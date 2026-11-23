@@ -157,34 +157,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const before = target.hp;
       target.hp = Math.min(target.maxHp, target.hp + amount);
       const healed = Math.round((target.hp - before) * 10) / 10;
-if (!rem && (!p.grace || p.grace <= 0)) {
-for (let k = 0; k < verts.length; k++) {
-const v1 = verts[k], v2 = verts[(k + 1) % verts.length];
-let nx = -(v2.y - v1.y), ny = v2.x - v1.x, nl = Math.hypot(nx, ny); nx /= nl; ny /= nl;
-if (nx * (CX - v1.x) + ny * (CY - v1.y) < 0) { nx = -nx; ny = -ny; }
-if ((p.x - v1.x) * nx + (p.y - v1.y) * ny < 0) { if (p.onWall) p.onWall(p, Engine); rem = true; break; }
-}
-}
-if (rem) projectiles.splice(i, 1);
-}
-for (let i = visualEffects.length - 1; i >= 0; i--) { visualEffects[i].duration -= dt; if (visualEffects[i].duration <= 0) visualEffects.splice(i, 1); }
-for (let i = floatingTexts.length - 1; i >= 0; i--) { floatingTexts[i].y -= 28 * dt; floatingTexts[i].life -= dt; if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1); }
-const aliveA = balls.some(b => b.team === 'A' && b.hp > 0), aliveB = balls.some(b => b.team === 'B' && b.hp > 0);
-if (!aliveA || !aliveB) {
-isRunning = false;
-document.getElementById('winnerText').textContent = aliveA ? 'A팀 (빨강) 승리!' : (aliveB ? 'B팀 (파랑) 승리!' : '무승부!');
-document.getElementById('resultModal').classList.add('active');
-}
-}
-function draw() {
-ctx.clearRect(0, 0, 360, 360);
-const verts = getVerts(sides);
-ctx.beginPath(); verts.forEach((v, i) => i === 0 ? ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y)); ctx.closePath();
-ctx.fillStyle = '#0f172a'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#334155'; ctx.stroke();
-for (const z of activeZones) {
-ctx.save();
-if (z.type === 'freezeField') {
-ctx.beginPath(); verts.forEach((v, i) => i === 0 ? ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y)); ctx.closePath();
+ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y)); ctx.closePath();
 ctx.fillStyle = 'rgba(56, 189, 248, 0.14)'; ctx.fill();
 } else {
 ctx.beginPath(); ctx.arc(z.x, z.y, z.radius, 0, Math.PI * 2); ctx.fillStyle = z.color; ctx.fill();
@@ -215,17 +188,7 @@ for (const ft of floatingTexts) { ctx.fillStyle = ft.color; ctx.font = 'bold 12p
 function loop(now) {
 if (!isRunning) return;
 const rawDt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
-if (!isPaused) {
-update(rawDt * speedMult);
-const renderCol = (team) => balls.filter(b => b.team === team).map(b => {
-let db = '';
-if (b.debuffs.bleed > 0) db += '출혈 ' + b.debuffs.bleed + '';
-if (b.debuffs.slow > 0) db += '둔화 ' + b.debuffs.slow + '';
-if (b.debuffs.shock > 0) db += '감전 ' + b.debuffs.shock + '';
-return '' + b.def.name + '' + Math.ceil(b.hp) + '/' + b.maxHp + '' + db + '';
-}).join('');
-document.getElementById('hudArea').innerHTML = '' + renderCol('A') + '' + renderCol('B') + '';
-}
+if (!isPaused) { update(rawDt * speedMult); updateHUD(); }
 draw();
 animId = requestAnimationFrame(loop);
 }
