@@ -1,286 +1,443 @@
-// ==========================================
-// 공 vs 공 시뮬레이터 공통 게임 엔진 (engine.js)
-// ==========================================
-window.addEventListener('DOMContentLoaded', () => {
-  const errBanner = document.getElementById('errorBanner');
-  if (typeof BALL_ROSTER === 'undefined' || typeof DEBUFF_DICTIONARY === 'undefined') {
-    errBanner.style.display = 'block';
-    errBanner.textContent = '오류: balls.js 파일이 없거나 문법 오류가 있습니다.';
-    return;
-  }
+let md = '1v1';
+let sd = 4;
+let sl = { A: [null], B: [null] };
+let as = { t: 'A', i: 0 };
+let si = 0;
+let ss = Array.of(1, 1.5, 2, 3);
+let sm = 1;
+let an = null;
+let lt = 0;
+let pa = 0;
+let rn = 0;
 
-  // 게임 전역 상태
-  let mode = '1v1'; // '1v1' | '2v2'
-  let sides = 4;    // 4, 8, 12
-  let slots = { A: [null], B: [null] };
-  let activeSlot = { team: 'A', idx: 0 };
+let bs = [];
+let pjs = [];
+let zns = [];
+let fxs = [];
+let txs = [];
 
-  let speedMult = 1;
-  const speedSteps = [1, 1.5, 2, 3];
-  let speedIdx = 0;
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const CX = 180;
+const CY = 180;
+const AR = 158;
+const BR = 14;
+const BS = 145;
 
-  let animId = null;
-  let lastTime = 0;
-  let isPaused = false;
-  let isRunning = false;
-
-  // 전투 오브젝트 배열
-  let balls = [];
-  let projectiles = [];
-  let activeZones = [];
-  let visualEffects = [];
-  let floatingTexts = [];
-
-  const canvas = document.getElementById('gameCanvas');
-  const ctx = canvas.getContext('2d');
-  const CX = canvas.width / 2;
-  const CY = canvas.height / 2;
-  const ARENA_R = 158;
-  const BALL_R = 14;
-  const BASE_SPEED = 145;
-
-  // ------------------------------------------
-  // 1. 공통 헬퍼 API (모든 공이 공유하는 엔진 함수)
-  // ------------------------------------------
-  const Engine = {
-    BALL_R,
-    BASE_SPEED,
-    CX,
-    CY,
-    ARENA_R,
-
-    getAliveEnemies(me) {
-      return balls.filter(b => b.hp > 0 && b.team !== me.team);
-    },
-
-    getAliveAllies(me, includeSelf = false) {
-      return balls.filter(b => b.hp > 0 && b.team === me.team && (includeSelf || b !== me));
-    },
-
-    getNearestEnemy(me) {
-      const enemies = this.getAliveEnemies(me);
-      if (!enemies.length) return null;
-      let best = enemies[0], minDist = Math.hypot(best.x - me.x, best.y - me.y);
-      for (let i = 1; i < enemies.length; i++) {
-        const d = Math.hypot(enemies[i].x - me.x, enemies[i].y - me.y);
-        if (d < minDist) { minDist = d; best = enemies[i]; }
-      }
-      return best;
-    },
-
-    spawnEffect(type, x, y, opts = {}) {
-      visualEffects.push({
-        type, x, y,
-        duration: opts.duration || 0.35,
-        maxDuration: opts.duration || 0.35,
-        radius: opts.radius || BALL_R * 2,
-        color: opts.color || '#ffffff',
-        angle: opts.angle || 0,
-        spread: opts.spread || Math.PI / 2,
-        x2: opts.x2 || x,
-        y2: opts.y2 || y,
-        lines: opts.lines || []
-      });
-    },
-
-    spawnText(x, y, text, color = '#ffffff') {
-      floatingTexts.push({ x, y, text, color, life: 0.7 });
-    },
-
-    addZone(zone) {
-      activeZones.push(zone);
-    },
-
-    addProjectile(proj) {
-      projectiles.push(proj);
-    },
-
-    healBall(target, amount) {
-      if (!target || target.hp <= 0 || amount <= 0) return;
-      const before = target.hp;
-      target.hp = Math.min(target.maxHp, target.hp + amount);
-      const healed = Math.round((target.hp - before) * 10) / 10;
-      if (healed > 0) this.spawnText(target.x, target.y - 16, `+${healed}`, '#4ade80');
-    },
-
-    applyDebuff(target, key, amount) {
-      if (!target || target.hp <= 0) return;
-      const maxMap = { bleed: 99, slow: 8, shock: 8 };
-      const maxVal = maxMap[key] || 99;
-      target.debuffs[key] = Math.min(maxVal, (target.debuffs[key] || 0) + amount);
-    },
-
-    applyHit(attacker, target, rawDamage, debuffs = {}, isTrueDamage = false) {
-      if (!target || target.hp <= 0) return false;
-      if (attacker && target.team === attacker.team) return false; // 아군 오사 원천 차단
-      if (target.invulnTimer > 0) {
-        this.spawnText(target.x, target.y - 14, '무적!', '#facc15');
-        return false;
-      }
-
-      let dmg = rawDamage;
-      // 공 C 패시브: 받는 피해 20% 감소 (고정 피해 제외)
-      if (!isTrueDamage && target.def.id === 'C') {
-        dmg = Math.round(dmg * 0.8 * 10) / 10;
-      }
-
-      // 보호막 우선 차감 (공 C)
-      if (target.shieldHp > 0 && dmg > 0) {
-        const absorbed = Math.min(target.shieldHp, dmg);
-        target.shieldHp -= absorbed;
-        target.shieldAbsorbed += absorbed;
-        dmg -= absorbed;
-        this.spawnText(target.x, target.y - 14, `흡수 ${absorbed}`, '#38bdf8');
-        if (target.shieldHp <= 0) {
-          target.shieldTimer = 0;
-          if (target.def.onShieldEnd) target.def.onShieldEnd(target, this);
-        }
-      }
-
-      if (dmg > 0) {
-        target.hp -= dmg;
-        target.flashTimer = 0.12;
-        this.spawnText(target.x, target.y - 12, `-${Math.round(dmg * 10) / 10}`, '#f87171');
-      }
-
-      // 디버프 부여
-      for (const [k, v] of Object.entries(debuffs)) {
-        this.applyDebuff(target, k, v);
-      }
-
-      // 공 I 체력 50% 이하 위기 각성 체크
-      if (target.def.id === 'I' && target.hp > 0 && target.hp <= target.maxHp * 0.5 && target.state.laserStage < 1) {
-        target.state.laserStage = 1;
-        this.spawnText(target.x, target.y - 20, '과전류 1단계!', '#facc15');
-      }
-
-      // 사망 체크 및 공 J 2v2 소생 패시브
-      if (target.hp <= 0) {
-        const allyHealer = balls.find(b => b.hp > 0 && b.team === target.team && b !== target && b.def.id === 'J' && !b.state.hasRevived);
-        if (allyHealer) {
-          allyHealer.state.hasRevived = true;
-          target.hp = target.maxHp * 0.5;
-          target.invulnTimer = 2.0;
-          this.spawnEffect('ring', target.x, target.y, { radius: BALL_R * 3, color: '#4ade80', duration: 0.45 });
-          this.spawnText(target.x, target.y - 18, '기적의 소생!', '#4ade80');
-        } else {
-          target.hp = 0;
-        }
-      }
-      return true;
-    },
-
-    onSkillAction(ball) {
-      // 출혈 발동 (행동 시 스택만큼 고정 피해)
-      if (ball.debuffs.bleed > 0) {
-        const bleedDmg = ball.debuffs.bleed;
-        this.spawnEffect('ring', ball.x, ball.y, { radius: BALL_R * 1.6, color: '#dc2626', duration: 0.25 });
-        this.applyHit(null, ball, bleedDmg, {}, true);
-      }
-      // 감전 방전 (스킬 시전 시 모든 감전 스택 소모)
-      if (ball.debuffs.shock > 0) {
-        ball.debuffs.shock = 0;
-        this.spawnText(ball.x, ball.y - 20, '감전 방전', '#fef08a');
+const E = {
+  ds(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  },
+  en(m) {
+    return bs.filter(b => b.hp > 0 && b.tm !== m.tm);
+  },
+  al(m) {
+    return bs.filter(b => b.hp > 0 && b.tm === m.tm && b !== m);
+  },
+  nr(m) {
+    const e = this.en(m);
+    if (!e.length) return null;
+    return e.reduce((a, b) => this.ds(m, b) <= this.ds(m, a) ? b : a);
+  },
+  fx(tp, x, y, r, c, ag = 0, ln = []) {
+    fxs.push({ tp, x, y, r, c, ag, ln, d: 0.35, md: 0.35 });
+  },
+  tx(x, y, t, c = '#fff') {
+    txs.push({ x, y, t, c, l: 0.7 });
+  },
+  zn(z) {
+    zns.push(z);
+  },
+  pj(ow, x, y, vx, vy, r, c, ig, oh, owall) {
+    pjs.push({ ow, x, y, vx, vy, r, c, ig, oh, owall, g: 0.15 });
+  },
+  hl(t, v) {
+    if (!t || t.hp <= 0) return;
+    const b = t.hp;
+    t.hp = Math.min(100, t.hp + v);
+    if (t.hp > b) this.tx(t.x, t.y - 16, '+' + Math.round(t.hp - b), '#4ade80');
+  },
+  hit(at, t, rw, db = {}, tr = 0) {
+    if (!t || t.hp <= 0) return;
+    if (at && t.tm === at.tm) return;
+    if (t.inv > 0) {
+      this.tx(t.x, t.y - 14, '무적', '#facc15');
+      return;
+    }
+    let d = rw;
+    if (!tr && t.df.id === 'C') d = Math.round(d * 0.8 * 10) / 10;
+    if (t.sh > 0 && d > 0) {
+      const ab = Math.min(t.sh, d);
+      t.sh -= ab;
+      t.shA += ab;
+      d -= ab;
+      if (t.sh <= 0) {
+        t.shT = 0;
+        if (t.df.shEnd) t.df.shEnd(t, this);
       }
     }
-  };
-
-  // ------------------------------------------
-  // 2. 편성 화면 UI 렌더링 및 이벤트
-  // ------------------------------------------
-  const slotsArea = document.getElementById('slotsArea');
-  const rosterList = document.getElementById('rosterList');
-  const btnStart = document.getElementById('btnStartBattle');
-
-  document.getElementById('ballCountBadge').textContent = `총 ${BALL_ROSTER.length}종 등록됨`;
-
-  function renderSlots() {
-    const count = mode === '1v1' ? 1 : 2;
-    let htmlA = '<div class="team-col">';
-    let htmlB = '<div class="team-col">';
-    for (let i = 0; i < count; i++) {
-      const bA = slots.A[i];
-      const selA = activeSlot.team === 'A' && activeSlot.idx === i ? 'selected' : '';
-      htmlA += `<div class="slot-box team-a ${bA ? 'filled' : ''} ${selA}" data-team="A" data-idx="${i}">
-        <span class="slot-label">A팀 ${mode === '2v2' ? i + 1 : ''}</span>
-        <span class="slot-name">${bA ? bA.name : '터치 후 선택'}</span>
-      </div>`;
-
-      const bB = slots.B[i];
-      const selB = activeSlot.team === 'B' && activeSlot.idx === i ? 'selected' : '';
-      htmlB += `<div class="slot-box team-b ${bB ? 'filled' : ''} ${selB}" data-team="B" data-idx="${i}">
-        <span class="slot-label">B팀 ${mode === '2v2' ? i + 1 : ''}</span>
-        <span class="slot-name">${bB ? bB.name : '터치 후 선택'}</span>
-      </div>`;
+    if (d > 0) {
+      t.hp -= d;
+      t.fl = 0.12;
+      this.tx(t.x, t.y - 12, '-' + Math.round(d * 10) / 10, '#f87171');
     }
-    htmlA += '</div>';
-    htmlB += '</div>';
-    slotsArea.innerHTML = htmlA + '<div class="vs-text">VS</div>' + htmlB;
-
-    slotsArea.querySelectorAll('.slot-box').forEach(el => {
-      el.onclick = () => {
-        activeSlot = { team: el.dataset.team, idx: Number(el.dataset.idx) };
-        renderSlots();
-      };
+    Object.entries(db).forEach(([k, v]) => {
+      t.db[k] = Math.min(99, (t.db[k] || 0) + v);
     });
-
-    const readyA = slots.A.slice(0, count).every(Boolean);
-    const readyB = slots.B.slice(0, count).every(Boolean);
-    btnStart.disabled = !(readyA && readyB);
+    if (t.df.id === 'I' && t.hp > 0 && t.hp <= 50 && t.st.v === 0) {
+      t.st.v = 1;
+      this.tx(t.x, t.y - 20, '과전류 1단계', '#facc15');
+    }
+    if (t.hp <= 0) {
+      const hl = bs.find(b => b.hp > 0 && b.tm === t.tm && b !== t && b.df.id === 'J' && !b.st.r);
+      if (hl) {
+        hl.st.r = 1;
+        t.hp = 50;
+        t.inv = 2;
+        this.tx(t.x, t.y - 18, '기적의 소생!', '#4ade80');
+      } else {
+        t.hp = 0;
+      }
+    }
   }
+};
 
-  function renderRoster() {
-    rosterList.innerHTML = BALL_ROSTER.map((b, idx) => `
-      <div class="ball-card" data-idx="${idx}">
-        <div class="ball-icon" style="background:${b.color}; border:2px solid rgba(255,255,255,0.4);">${b.symbol || b.id}</div>
-        <div class="ball-info">
-          <div class="ball-title">${b.name} <span style="font-size:11px; color:#94a3b8; font-weight:600;">(HP ${b.hp})</span></div>
-          <div class="ball-desc">${b.desc}</div>
-        </div>
-      </div>
-    `).join('');
+function mk(g, c, t) {
+  const d = document.createElement(g);
+  if (c) d.className = c;
+  if (t !== undefined) d.textContent = t;
+  return d;
+}
 
-    rosterList.querySelectorAll('.ball-card').forEach(el => {
-      el.onclick = () => {
-        const chosen = BALL_ROSTER[Number(el.dataset.idx)];
-        slots[activeSlot.team][activeSlot.idx] = chosen;
-        // 자동으로 다음 빈 슬롯 포커스 이동
-        const count = mode === '1v1' ? 1 : 2;
-        if (activeSlot.team === 'A') {
-          if (activeSlot.idx + 1 < count && !slots.A[activeSlot.idx + 1]) activeSlot.idx++;
-          else activeSlot = { team: 'B', idx: 0 };
-        } else {
-          if (activeSlot.idx + 1 < count && !slots.B[activeSlot.idx + 1]) activeSlot.idx++;
-        }
-        renderSlots();
-      };
-    });
-  }
+document.getElementById('cnt').textContent = '총 ' + BALLS.length + '종 등록됨';
 
-  document.getElementById('btnMode1v1').onclick = (e) => {
-    mode = '1v1';
-    slots = { A: [slots.A[0] || null], B: [slots.B[0] || null] };
-    activeSlot = { team: 'A', idx: 0 };
-    e.target.classList.add('active');
-    document.getElementById('btnMode2v2').classList.remove('active');
-    renderSlots();
-  };
+function rSl() {
+  const a = document.getElementById('sl');
+  a.innerHTML = '';
+  const c = md === '1v1' ? 1 : 2;
+  Array.of('A', 'B').forEach((tm, ti) => {
+    if (ti === 1) a.appendChild(mk('div', '', 'VS'));
+    const col = mk('div', 'tc');
+    for (let i = 0; i < c; i++) {
+      const b = sl[tm].at(i);
+      const cls = 'bx' + (b ? ' f' + tm.toLowerCase() : '') + (as.t === tm && as.i === i ? ' sel' : '');
+      const bx = mk('div', cls);
+      bx.appendChild(mk('div', '', tm + '팀 ' + (c === 2 ? i + 1 : '')));
+      bx.appendChild(mk('div', '', b ? b.n : '터치 선택'));
+      bx.onclick = () => { as = { t: tm, i }; rSl(); };
+      col.appendChild(bx);
+    }
+    a.appendChild(col);
+  });
+  const okA = sl.A.slice(0, c).every(Boolean);
+  const okB = sl.B.slice(0, c).every(Boolean);
+  document.getElementById('go').disabled = !(okA && okB);
+}
 
-  document.getElementById('btnMode2v2').onclick = (e) => {
-    mode = '2v2';
-    slots = { A: [slots.A[0] || null, null], B: [slots.B[0] || null, null] };
-    activeSlot = { team: 'A', idx: 0 };
-    e.target.classList.add('active');
-    document.getElementById('btnMode1v1').classList.remove('active');
-    renderSlots();
-  };
-
-  document.querySelectorAll('.shape-btn').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      sides = Number(btn.dataset.shape);
+function rRl() {
+  const l = document.getElementById('rl');
+  l.innerHTML = '';
+  const c = md === '1v1' ? 1 : 2;
+  BALLS.forEach(b => {
+    const cd = mk('div', 'cd');
+    const ic = mk('div', 'ic', b.s);
+    ic.style.background = b.c;
+    const inf = mk('div');
+    inf.appendChild(mk('div', '', b.n));
+    inf.appendChild(mk('div', '', b.d));
+    cd.appendChild(ic);
+    cd.appendChild(inf);
+    cd.onclick = () => {
+      sl[as.t][as.i] = b;
+      if (as.t === 'A') {
+        if (as.i + 1 < c && !sl.A.at(as.i + 1)) as.i++;
+        else as = { t: 'B', i: 0 };
+      } else if (as.i + 1 < c && !sl.B.at(as.i + 1)) {
+        as.i++;
+      }
+      rSl();
     };
+    l.appendChild(cd);
+  });
+}
+
+document.getElementById('m1').onclick = e => {
+  md = '1v1';
+  sl = { A: [sl.A.at(0) || null], B: [sl.B.at(0) || null] };
+  as = { t: 'A', i: 0 };
+  e.target.classList.add('on');
+  document.getElementById('m2').classList.remove('on');
+  rSl();
+};
+
+document.getElementById('m2').onclick = e => {
+  md = '2v2';
+  sl = { A: [sl.A.at(0) || null, null], B: [sl.B.at(0) || null, null] };
+  as = { t: 'A', i: 0 };
+  e.target.classList.add('on');
+  document.getElementById('m1').classList.remove('on');
+  rSl();
+};
+
+document.querySelectorAll('.sb').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    sd = Number(b.dataset.s);
+  };
+});
+
+function opD(p) {
+  if (p) pa = 1;
+  const dl = document.getElementById('dl');
+  dl.innerHTML = '';
+  DICTS.forEach(d => {
+    const it = mk('div', '');
+    it.style.marginBottom = '8px';
+    it.appendChild(mk('div', '', d.n));
+    it.appendChild(mk('div', '', d.d));
+    dl.appendChild(it);
+  });
+  document.getElementById('dm').classList.add('on');
+}
+
+document.getElementById('od1').onclick = () => opD(0);
+document.getElementById('od2').onclick = () => opD(1);
+document.getElementById('cdm').onclick = () => {
+  document.getElementById('dm').classList.remove('on');
+  pa = 0;
+  lt = performance.now();
+};
+
+function gV(n) {
+  const v = [];
+  const o = n === 4 ? Math.PI / 4 : -Math.PI / 2;
+  for (let i = 0; i < n; i++) {
+    const a = o + (i * 2 * Math.PI) / n;
+    v.push({ x: CX + AR * Math.cos(a), y: CY + AR * Math.sin(a) });
+  }
+  return v;
+}
+
+function stB() {
+  if (an) cancelAnimationFrame(an);
+  bs = [];
+  pjs = [];
+  zns = [];
+  fxs = [];
+  txs = [];
+  pa = 0;
+  rn = 1;
+  const c = md === '1v1' ? 1 : 2;
+  for (let i = 0; i < c; i++) {
+    const yo = c === 1 ? 0 : (i === 0 ? -42 : 42);
+    Array.of(Array.of('A', sl.A.at(i), CX - 65), Array.of('B', sl.B.at(i), CX + 65)).forEach(([tm, df, x]) => {
+      const a = Math.random() * Math.PI * 2;
+      const b = {
+        df, tm, x, y: CY + yo,
+        vx: Math.cos(a) * BS, vy: Math.sin(a) * BS,
+        hp: 100, cc: 0, cm: df.cd,
+        sh: 0, shT: 0, shA: 0, inv: 0, fl: 0,
+        sdT: 0, ht: 0, hv: 0,
+        db: { bleed: 0, slow: 0, shock: 0 }, st: {}
+      };
+      if (df.init) df.init(b);
+      bs.push(b);
+    });
+  }
+  document.getElementById('s1').classList.remove('on');
+  document.getElementById('rm').classList.remove('on');
+  document.getElementById('s2').classList.add('on');
+  lt = performance.now();
+  an = requestAnimationFrame(lp);
+}
+
+document.getElementById('go').onclick = stB;
+document.getElementById('re').onclick = stB;
+document.getElementById('bk').onclick = () => {
+  rn = 0;
+  cancelAnimationFrame(an);
+  document.getElementById('rm').classList.remove('on');
+  document.getElementById('s2').classList.remove('on');
+  document.getElementById('s1').classList.add('on');
+};
+document.getElementById('ed').onclick = () => {
+  rn = 0;
+  cancelAnimationFrame(an);
+  document.getElementById('s2').classList.remove('on');
+  document.getElementById('s1').classList.add('on');
+};
+document.getElementById('sp').onclick = e => {
+  si = (si + 1) % 4;
+  sm = ss.at(si);
+  e.target.textContent = sm + 'x 배속';
+};
+
+function upd(dt) {
+  const vs = gV(sd);
+  zns = zns.filter(z => {
+    z.lf -= dt;
+    if (z.up) z.up(z);
+    return z.lf > 0;
+  });
+  bs.forEach(b => {
+    if (b.hp <= 0) return;
+    if (b.fl > 0) b.fl -= dt;
+    if (b.inv > 0) b.inv -= dt;
+    if (b.sh > 0) {
+      b.shT -= dt;
+      if (b.shT <= 0) {
+        b.sh = 0;
+        if (b.df.shEnd) b.df.shEnd(b, E);
+      }
+    }
+    if (b.ht > 0) {
+      const t = Math.min(dt, b.ht);
+      b.ht -= t;
+      b.hp = Math.min(100, b.hp + (b.hv / 3) * t);
+    }
+    if (b.db.slow > 0) {
+      b.sdT += dt;
+      if (b.sdT >= 5) {
+        b.sdT -= 5;
+        b.db.slow = Math.max(0, b.db.slow - 1);
+      }
+    }
+    let m = (b.st.p || 1) * (b.db.slow > 0 ? Math.max(0.2, 1 - b.db.slow * 0.1) : 1);
+    if (zns.find(z => z.tp === 'ice' && z.tm !== b.tm)) m *= 0.5;
+    const cs = Math.hypot(b.vx, b.vy) || BS;
+    b.vx = (b.vx / cs) * BS * m;
+    b.vy = (b.vy / cs) * BS * m;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+
+    vs.forEach((v1, k) => {
+      const v2 = vs.at((k + 1) % vs.length);
+      let nx = -(v2.y - v1.y);
+      let ny = v2.x - v1.x;
+      const nl = Math.hypot(nx, ny);
+      nx /= nl;
+      ny /= nl;
+      if (nx * (CX - v1.x) + ny * (CY - v1.y) < 0) {
+        nx = -nx;
+        ny = -ny;
+      }
+      const d = (b.x - v1.x) * nx + (b.y - v1.y) * ny;
+      if (d < BR) {
+        b.x += nx * (BR - d);
+        b.y += ny * (BR - d);
+        const o = b.vx * nx + b.vy * ny;
+        if (o < 0) {
+          b.vx -= 2 * o * nx;
+          b.vy -= 2 * o * ny;
+        }
+      }
+    });
+    b.cc += dt * Math.max(0.2, 1 - (b.db.shock || 0) * 0.1);
+    if (b.cc >= b.cm) {
+      b.cc = 0;
+      if (b.db.bleed > 0) E.hit(null, b, b.db.bleed, {}, 1);
+      if (b.db.shock > 0) b.db.shock = 0;
+      if (b.hp > 0 && b.df.act) b.df.act(b, E);
+    }
+    if (b.df.tick) b.df.tick(b, dt, E);
   });
 
-  // 도감 모달
+  for (let i = 0; i < bs.length; i++) {
+    for (let j = i + 1; j < bs.length; j++) {
+      const a = bs.at(i);
+      const b = bs.at(j);
+      if (a.hp <= 0 || b.hp <= 0) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0 && d < BR * 2) {
+        const nx = dx / d;
+        const ny = dy / d;
+        const ov = BR * 2 - d;
+        a.x -= nx * ov * 0.5;
+        a.y -= ny * ov * 0.5;
+        b.x += nx * ov * 0.5;
+        b.y += ny * ov * 0.5;
+        const o = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        if (o < 0) {
+          a.vx += o * nx;
+          a.vy += o * ny;
+          b.vx -= o * nx;
+} else if (f.tp === 'arc') {
+ctx.beginPath();
+ctx.moveTo(f.x, f.y);
+ctx.arc(f.x, f.y, f.r, f.ag - 1.1, f.ag + 1.1);
+ctx.closePath();
+ctx.fillStyle = f.c;
+ctx.fill();
+} else if (f.tp === 'ls') {
+ctx.strokeStyle = f.c;
+ctx.lineWidth = f.r;
+f.ln.forEach(l => {
+ctx.beginPath();
+ctx.moveTo(l.a, l.b);
+ctx.lineTo(l.c, l.d);
+ctx.stroke();
+});
+}
+ctx.restore();
+});
+txs.forEach(t => {
+ctx.fillStyle = t.c;
+ctx.font = 'bold 12px sans-serif';
+ctx.textAlign = 'center';
+ctx.fillText(t.t, t.x, t.y);
+});
+}
+function uHud() {
+const h = document.getElementById('hud');
+h.innerHTML = '';
+Array.of('A', 'B').forEach(tm => {
+const c = mk('div', 'tc');
+bs.filter(b => b.tm === tm).forEach(b => {
+const cd = mk('div', 'hc' + (tm === 'B' ? ' b' : ''));
+const tp = mk('div', '');
+tp.style.display = 'flex';
+tp.style.justifyContent = 'space-between';
+tp.style.fontSize = '12px';
+tp.appendChild(mk('span', '', b.df.n));
+tp.appendChild(mk('span', '', Math.ceil(b.hp) + '/100'));
+cd.appendChild(tp);
+const hb = mk('div', 'bar');
+const hf = mk('div', '');
+hf.style.height = '100%';
+hf.style.background = '#ef4444';
+hf.style.width = Math.max(0, b.hp) + '%';
+hb.appendChild(hf);
+cd.appendChild(hb);
+const cb = mk('div', 'bar');
+const cf = mk('div', '');
+cf.style.height = '100%';
+cf.style.background = '#38bdf8';
+cf.style.width = Math.min(100, (b.cc / b.cm) * 100) + '%';
+cb.appendChild(cf);
+cd.appendChild(cb);
+const dl = mk('div', 'db');
+if (b.db.bleed > 0) dl.appendChild(mk('span', '', '출혈 ' + b.db.bleed));
+if (b.db.slow > 0) dl.appendChild(mk('span', '', '둔화 ' + b.db.slow));
+if (b.db.shock > 0) dl.appendChild(mk('span', '', '감전 ' + b.db.shock));
+cd.appendChild(dl);
+c.appendChild(cd);
+});
+h.appendChild(c);
+});
+}
+function lp(nw) {
+if (!rn) return;
+const dt = Math.min(0.05, (nw - lt) / 1000);
+lt = nw;
+if (!pa) {
+upd(dt * sm);
+uHud();
+}
+drw();
+an = requestAnimationFrame(lp);
+}
+rSl();
+rRl();
