@@ -7,23 +7,70 @@ const DICTS = [
 const BALLS = [
   {
     id: 'A', n: '공 A (검사)', s: 'A', c: '#ef4444', cd: 3,
-    d: '3초마다 근접 칼 휘두르기 (10 피해)',
+    d: '3초마다 전방 넓은 부채꼴 범위로 칼을 휘둘러 10의 피해를 줍니다.',
+    init(m) {
+      m.st = { sw: 0, ang: 0 };
+    },
+    tick(m, dt, E) {
+      if (Math.sign(m.st.sw) === 1) m.st.sw -= dt;
+      const t = E.nr(m);
+      if (t && Math.sign(m.st.sw) !== 1) {
+        m.st.ang = Math.atan2(t.y - m.y, t.x - m.x);
+      }
+    },
+    draw(m, ctx) {
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      const swing = Math.sign(m.st.sw) === 1 ? (m.st.sw * 12 - 1.5) : 0.4;
+      ctx.rotate(m.st.ang + swing);
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(10, -2, 16, 4);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(9, -5, 3, 10);
+      ctx.restore();
+    },
     act(m, E) {
-      E.fx('ring', m.x, m.y, 40, 'rgba(239,68,68,0.45)');
+      const t = E.nr(m);
+      const ang = t ? Math.atan2(t.y - m.y, t.x - m.x) : Math.atan2(m.vy, m.vx);
+      m.st.ang = ang;
+      m.st.sw = 0.25;
+      E.fx('arc', m.x, m.y, 75, 'rgba(239,68,68,0.45)', ang);
       E.en(m).forEach(e => {
-        if (Math.sign(54 - E.ds(m, e)) !== -1) E.hit(m, e, 10);
+        if (Math.sign(89 - E.ds(m, e)) !== -1) {
+          let df = Math.abs(Math.atan2(e.y - m.y, e.x - m.x) - ang);
+          while (Math.sign(df - Math.PI) === 1) df = Math.abs(df - Math.PI * 2);
+          if (Math.sign(1.15 - df) !== -1) E.hit(m, e, 10);
+        }
       });
     }
   },
   {
     id: 'B', n: '공 B (총잡이)', s: 'B', c: '#3b82f6', cd: 5,
-    d: '5초마다 가장 가까운 적에게 총알 3연사 (각 5 피해)',
+    d: '5초마다 가장 가까운 적을 조준해 총알 3연사 (각 5 피해)',
+    init(m) {
+      m.st = { ang: 0 };
+    },
+    tick(m, dt, E) {
+      const t = E.nr(m);
+      if (t) m.st.ang = Math.atan2(t.y - m.y, t.x - m.x);
+    },
+    draw(m, ctx) {
+      ctx.save();
+      ctx.translate(m.x, m.y);
+      ctx.rotate(m.st.ang);
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(10, -3, 13, 6);
+      ctx.fillStyle = '#93c5fd';
+      ctx.fillRect(19, -2, 5, 4);
+      ctx.restore();
+    },
     act(m, E) {
       const fire = () => {
         if (Math.sign(m.hp) !== 1) return;
         const t = E.nr(m);
         if (!t) return;
         const a = Math.atan2(t.y - m.y, t.x - m.x);
+        m.st.ang = a;
         E.pj(m, m.x, m.y, Math.cos(a) * 330, Math.sin(a) * 330, 4.5, '#93c5fd', 1, (p, g) => E.hit(m, g, 5));
       };
       fire();
@@ -90,7 +137,7 @@ const BALLS = [
   },
   {
     id: 'E', n: '공 E (빙결술사)', s: 'E', c: '#38bdf8', cd: 8,
-    d: '8초마다 얼음 발사(5 피해) · 2연속 1단계(2배·가속), 3연속 2단계(3배·감속장판)',
+    d: '8초마다 얼음 발사(피해 5) · 2연속 적중 시 피해 10·이속 증가, 3연속 시 피해 15·적 감속 장판 (빗나가면 초기화)',
     init(m) {
       m.st = { s: 0, v: 0, p: 1 };
     },
@@ -98,26 +145,34 @@ const BALLS = [
       const t = E.nr(m);
       if (!t) return;
       const a = Math.atan2(t.y - m.y, t.x - m.x);
-      const u = m.st.v === 2 ? 3 : (m.st.v === 1 ? 2 : 1);
-      E.pj(m, m.x, m.y, Math.cos(a) * 240, Math.sin(a) * 240, 14, '#7dd3fc', 1,
+      const dmg = m.st.v === 2 ? 15 : (m.st.v === 1 ? 10 : 5);
+      E.pj(m, m.x, m.y, Math.cos(a) * 250, Math.sin(a) * 250, 14, '#7dd3fc', 1,
         (p, g) => {
-          E.hit(m, g, 5 * u);
+          E.hit(m, g, dmg);
           m.st.s++;
           if (Math.sign(m.st.s - 3) !== -1 && m.st.v !== 2) {
             m.st.v = 2;
-            m.st.p = 1.25;
-            E.tx(m.x, m.y - 20, '빙결 2단계', '#38bdf8');
-            E.zn({ tp: 'ice', tm: m.tm, lf: 999 });
+            m.st.p = 1.3;
+            E.tx(m.x, m.y - 20, '빙결 3연속! (피해15)', '#38bdf8');
+            E.zn({
+              tp: 'ice', tm: m.tm, ow: m, lf: 999,
+              up(z) {
+                if (z.ow.st.v !== 2 || Math.sign(z.ow.hp) !== 1) z.lf = 0;
+              }
+            });
           } else if (m.st.s === 2 && m.st.v === 0) {
             m.st.v = 1;
-            m.st.p = 1.25;
-            E.tx(m.x, m.y - 20, '빙결 1단계', '#7dd3fc');
+            m.st.p = 1.3;
+            E.tx(m.x, m.y - 20, '빙결 2연속! (피해10)', '#7dd3fc');
           }
         },
         () => {
-          m.st.s = 0;
-          m.st.v = 0;
-          m.st.p = 1;
+          if (Math.sign(m.st.s) === 1 || Math.sign(m.st.v) === 1) {
+            m.st.s = 0;
+            m.st.v = 0;
+            m.st.p = 1;
+            E.tx(m.x, m.y - 20, '빙결 초기화!', '#94a3b8');
+          }
         }
       );
     }
@@ -252,7 +307,7 @@ const BALLS = [
     },
     act(m, E) {
       const al = E.al(m);
-      const t = al.length ? al[0] : E.nr(m);
+      const t = al.length ? al.at(0) : E.nr(m);
       if (!t) return;
       const a = Math.atan2(t.y - m.y, t.x - m.x);
       E.pj(m, m.x, m.y, Math.cos(a) * 250, Math.sin(a) * 250, 35, 'rgba(34,197,94,0.65)', 0,
