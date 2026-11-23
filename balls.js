@@ -1,209 +1,211 @@
-const DEBUFF_DICTIONARY = [
-  { id: 'bleed', name: '출혈 (Bleed)', desc: '부여된 공이 쿨타임 스킬을 발동할 때마다 현재 출혈 스택만큼 고정 피해를 입습니다. (최대 99스택)' },
-  { id: 'slow', name: '둔화 (Slow)', desc: '스택 1당 이동속도가 기본 속도의 10%씩 감소합니다. 5초마다 1씩 감소합니다. (최대 8스택)' },
-  { id: 'shock', name: '감전 (Shock)', desc: '스택 1당 쿨타임 충전 속도가 10% 느려집니다. 스킬 시전 시 모든 감전 스택이 소모됩니다.' }
+const DICTS = [
+  {
+    n: '출혈 (Bleed)',
+    d: '스킬 발동 시 현재 출혈 스택만큼 고정 피해를 입습니다.'
+  },
+  {
+    n: '둔화 (Slow)',
+    d: '스택 1당 이속 10% 감소 (5초마다 1씩 감소).'
+  },
+  {
+    n: '감전 (Shock)',
+    d: '스택 1당 쿨타임 충전 속도 10% 지연 (스킬 시전 시 초기화).'
+  }
 ];
 
-const BALL_ROSTER = [
+const BALLS = [
   {
-    id: 'A', name: '공 A (검사)', symbol: 'A', color: '#ef4444', hp: 100, cooldown: 3.0,
-    desc: '쿨타임 3초 · 주변 근접 범위에 칼을 휘둘러 10의 피해를 줍니다.',
-    onAction(me, E) {
-      const range = E.BALL_R * 2.8;
-      E.spawnEffect('ring', me.x, me.y, { radius: range, color: 'rgba(239, 68, 68, 0.45)', duration: 0.3 });
-      for (const enemy of E.getAliveEnemies(me)) {
-        if (Math.hypot(enemy.x - me.x, enemy.y - me.y) <= range + E.BALL_R) E.applyHit(me, enemy, 10);
-      }
+    id: 'A', n: '공 A (검사)', s: 'A', c: '#ef4444', cd: 3,
+    d: '3초마다 근접 칼 휘두르기 (10 피해)',
+    act(m, E) {
+      E.fx('ring', m.x, m.y, 40, 'rgba(239,68,68,0.45)');
+      E.en(m).forEach(e => {
+        if (E.ds(m, e) <= 54) E.hit(m, e, 10);
+      });
     }
   },
   {
-    id: 'B', name: '공 B (총잡이)', symbol: 'B', color: '#3b82f6', hp: 100, cooldown: 5.0,
-    desc: '쿨타임 5초 · 가장 가까운 적을 조준해 피해 5짜리 총알 3발을 연속 발사합니다.',
-    onAction(me, E) {
+    id: 'B', n: '공 B (총잡이)', s: 'B', c: '#3b82f6', cd: 5,
+    d: '5초마다 가장 가까운 적에게 총알 3연사 (각 5 피해)',
+    act(m, E) {
       for (let i = 0; i < 3; i++) {
         setTimeout(() => {
-          if (me.hp <= 0) return;
-          const target = E.getNearestEnemy(me);
-          if (!target) return;
-          const dx = target.x - me.x, dy = target.y - me.y, dist = Math.hypot(dx, dy) || 1;
-          E.addProjectile({
-            owner: me, x: me.x, y: me.y, vx: (dx / dist) * 330, vy: (dy / dist) * 330,
-            radius: 4.5, color: '#93c5fd', ignoreAlly: true, grace: 0.08,
-            onHit(p, t, eng) { eng.applyHit(p.owner, t, 5); }
-          });
+          if (m.hp <= 0) return;
+          const t = E.nr(m);
+          if (!t) return;
+          const a = Math.atan2(t.y - m.y, t.x - m.x);
+          E.pj(m, m.x, m.y, Math.cos(a) * 330, Math.sin(a) * 330,
+            4.5, '#93c5fd', 1, (p, g) => E.hit(m, g, 5));
         }, i * 120);
       }
     }
   },
   {
-    id: 'C', name: '공 C (수호자)', symbol: 'C', color: '#eab308', hp: 100, cooldown: 10.0,
-    desc: '패시브: 받는 피해 20% 감소 · 쿨타임 10초 · 5초간 HP 20 보호막(소멸 시 흡수량 1.5배 반사, 무피해 시 다음 쿨타임 2초 단축).',
-    onAction(me) { me.shieldHp = 20; me.shieldTimer = 5.0; me.shieldAbsorbed = 0; },
-    onShieldEnd(me, E) {
-      if (me.shieldAbsorbed <= 0) {
-        me.cooldown = Math.min(me.maxCooldown - 0.1, me.cooldown + 2.0);
-        E.spawnText(me.x, me.y - 18, '쿨타임 -2초!', '#fde047');
+    id: 'C', n: '공 C (수호자)', s: 'C', c: '#eab308', cd: 10,
+    d: '받는 피해 20% 감소 · 10초마다 5초간 HP 20 보호막(흡수량 1.5배 반사, 무피해 시 쿨 -2초)',
+    act(m) {
+      m.sh = 20;
+      m.shT = 5;
+      m.shA = 0;
+    },
+    shEnd(m, E) {
+      if (m.shA <= 0) {
+        m.cc = Math.min(m.cm - 0.1, m.cc + 2);
+        E.tx(m.x, m.y - 18, '쿨 -2초', '#fde047');
       } else {
-        const dmg = Math.round(me.shieldAbsorbed * 1.5);
-        const target = E.getNearestEnemy(me);
-        if (target && dmg > 0) {
-          E.spawnEffect('ring', target.x, target.y, { radius: E.BALL_R * 2.2, color: 'rgba(250, 204, 21, 0.55)', duration: 0.35 });
-          E.applyHit(me, target, dmg);
+        const t = E.nr(m);
+        const d = Math.round(m.shA * 1.5);
+        if (t && d > 0) {
+          E.fx('ring', t.x, t.y, 30, 'rgba(250,204,21,0.5)');
+          E.hit(m, t, d);
         }
       }
-      me.shieldAbsorbed = 0;
+      m.shA = 0;
     }
   },
   {
-    id: 'D', name: '공 D (화염술사)', symbol: 'D', color: '#f97316', hp: 100, cooldown: 5.0,
-    desc: '쿨타임 5초 · 제자리 반지름 4.5배 화염 폭발(피해 7 + 5초간 초당 1 화상) · 누적 화상 10마다 체력 5 회복.',
-    init(me) { me.state.burnAccum = 0; me.state.burnTargets = []; },
-    drawAura(me, ctx, E) {
-      ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R + 4, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(249, 115, 22, 0.25)'; ctx.fill();
+    id: 'D', n: '공 D (화염술사)', s: 'D', c: '#f97316', cd: 5,
+    d: '5초마다 반지름 4.5배 화염 폭발(7 피해+5초 화상) · 누적 화상 10마다 회복 5',
+    init(m) {
+      m.st = { a: 0, l: [] };
     },
-    onAction(me, E) {
-      const range = E.BALL_R * 4.5;
-      E.spawnEffect('ring', me.x, me.y, { radius: range, color: 'rgba(249, 115, 22, 0.35)', duration: 0.4 });
-      for (const enemy of E.getAliveEnemies(me)) {
-        if (Math.hypot(enemy.x - me.x, enemy.y - me.y) <= range + E.BALL_R) {
-          E.applyHit(me, enemy, 7);
-          const ex = me.state.burnTargets.find(bt => bt.target === enemy);
-          if (ex) ex.remain = 5.0; else me.state.burnTargets.push({ target: enemy, remain: 5.0, tickAcc: 0 });
+    act(m, E) {
+      E.fx('ring', m.x, m.y, 63, 'rgba(249,115,22,0.35)');
+      E.en(m).forEach(e => {
+        if (E.ds(m, e) <= 77) {
+          E.hit(m, e, 7);
+          const f = m.st.l.find(x => x.t === e);
+          if (f) f.r = 5;
+          else m.st.l.push({ t: e, r: 5, k: 0 });
         }
-      }
+      });
     },
-    onTick(me, dt, E) {
-      for (let i = me.state.burnTargets.length - 1; i >= 0; i--) {
-        const bt = me.state.burnTargets[i];
-        if (bt.target.hp <= 0 || bt.remain <= 0) { me.state.burnTargets.splice(i, 1); continue; }
-        bt.remain -= dt; bt.tickAcc += dt;
-        if (bt.tickAcc >= 1.0) {
-          bt.tickAcc -= 1.0;
-          E.applyHit(me, bt.target, 1, {}, true);
-          me.state.burnAccum += 1;
-          if (me.state.burnAccum >= 10) { me.state.burnAccum -= 10; E.healBall(me, 5); }
-        }
-      }
-    }
-  },
-  {
-    id: 'E', name: '공 E (빙결술사)', symbol: 'E', color: '#38bdf8', hp: 100, cooldown: 8.0,
-    desc: '쿨타임 8초 · 얼음 발사(피해 5) · 2연속 적중 시 1단계(공격 2배·이속 1.25배), 3연속 시 2단계(공격 3배·적 감속 장판) · 빗나가면 초기화.',
-    init(me) { me.state.hitStreak = 0; me.state.freezeStack = 0; me.state.speedMult = 1.0; },
-    drawAura(me, ctx, E) {
-      if (me.state.freezeStack > 0) {
-        ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R + 4 + me.state.freezeStack * 3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.35)'; ctx.fill();
-      }
-    },
-    onAction(me, E) {
-      const target = E.getNearestEnemy(me);
-      if (!target) return;
-      const dx = target.x - me.x, dy = target.y - me.y, dist = Math.hypot(dx, dy) || 1;
-      const mult = me.state.freezeStack === 2 ? 3 : (me.state.freezeStack === 1 ? 2 : 1);
-      E.addProjectile({
-        owner: me, x: me.x, y: me.y, vx: (dx / dist) * 240, vy: (dy / dist) * 240,
-        radius: E.BALL_R, color: '#7dd3fc', ignoreAlly: true, grace: 0.12,
-        onHit(p, t, eng) {
-          eng.applyHit(p.owner, t, 5 * mult);
-          me.state.hitStreak += 1;
-          if (me.state.hitStreak >= 3 && me.state.freezeStack < 2) {
-            me.state.freezeStack = 2; me.state.speedMult = 1.25;
-            eng.spawnText(me.x, me.y - 20, '빙결 2단계!', '#38bdf8');
-            eng.addZone({ type: 'freezeField', team: me.team, owner: me, life: 999 });
-          } else if (me.state.hitStreak === 2 && me.state.freezeStack < 1) {
-            me.state.freezeStack = 1; me.state.speedMult = 1.25;
-            eng.spawnText(me.x, me.y - 20, '빙결 1단계!', '#7dd3fc');
-          }
-        },
-        onWall(p, eng) {
-          if (me.state.hitStreak > 0 || me.state.freezeStack > 0) {
-            me.state.hitStreak = 0; me.state.freezeStack = 0; me.state.speedMult = 1.0;
-            eng.spawnText(me.x, me.y - 18, '빙결 초기화', '#94a3b8');
+    tick(m, dt, E) {
+      m.st.l.forEach(x => {
+        if (x.t.hp <= 0 || x.r <= 0) return;
+        x.r -= dt;
+        x.k += dt;
+        if (x.k >= 1) {
+          x.k -= 1;
+          E.hit(m, x.t, 1, {}, 1);
+          m.st.a++;
+          if (m.st.a >= 10) {
+            m.st.a -= 10;
+            E.hl(m, 5);
           }
         }
       });
     }
   },
   {
-    id: 'F', name: '공 F (킬러퀸)', symbol: '☠', color: '#f472b6', hp: 100, cooldown: 4.0,
-    desc: '패시브: 1초마다 폭탄 설치 · 쿨타임 4초 · 설치된 모든 폭탄 일제 기폭(각 반지름 3배 범위 10 피해).',
-    init(me) { me.state.bombTimer = 0; me.state.bombs = []; },
-    onTick(me, dt, E) {
-      me.state.bombTimer += dt;
-      if (me.state.bombTimer >= 1.0) {
-        me.state.bombTimer -= 1.0;
-        if (me.state.bombs.length < 10) {
-          const z = { type: 'killerBomb', team: me.team, x: me.x, y: me.y, radius: 7, color: '#ec4899', stroke: '#fbcfe8', life: 999 };
-          me.state.bombs.push(z); E.addZone(z);
-        }
-      }
+    id: 'E', n: '공 E (빙결술사)', s: 'E', c: '#38bdf8', cd: 8,
+    d: '8초마다 얼음 발사(5 피해) · 2연속 1단계(2배·가속), 3연속 2단계(3배·감속장판)',
+    init(m) {
+      m.st = { s: 0, v: 0, p: 1 };
     },
-    onAction(me, E) {
-      const blastR = E.BALL_R * 3.0;
-      for (const bmb of me.state.bombs) {
-        bmb.life = 0;
-        E.spawnEffect('ring', bmb.x, bmb.y, { radius: blastR, color: 'rgba(244, 114, 182, 0.55)', duration: 0.35 });
-        for (const enemy of E.getAliveEnemies(me)) {
-          if (Math.hypot(enemy.x - bmb.x, enemy.y - bmb.y) <= blastR + E.BALL_R) E.applyHit(me, enemy, 10);
-        }
-      }
-      me.state.bombs = [];
-    }
-  },
-  {
-    id: 'G', name: '공 G (혈귀)', symbol: 'G', color: '#881337', hp: 100, cooldown: 4.0,
-    desc: '쿨타임 4초 · 적 방향 좌·우 대각선 연속 할퀴기(각 6 피해 + 출혈 1 부여) · 2연타 모두 적중 시 체력 1 회복.',
-    drawAura(me, ctx, E) {
-      ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R + 4, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(225, 29, 72, 0.25)'; ctx.fill();
-    },
-    onAction(me, E) {
-      const target = E.getNearestEnemy(me);
-      if (!target) return;
-      const baseAng = Math.atan2(target.y - me.y, target.x - me.x);
-      const range = E.BALL_R * 6.5, spread = (125 * Math.PI) / 180;
-      let hitFirst = false;
-      const doSlash = (offsetAng, isSecond) => {
-        if (me.hp <= 0) return;
-        const ang = baseAng + offsetAng;
-        E.spawnEffect('arc', me.x, me.y, { radius: range, angle: ang, spread, color: 'rgba(225, 29, 72, 0.45)', duration: 0.3 });
-        let hitAny = false;
-        for (const enemy of E.getAliveEnemies(me)) {
-          if (Math.hypot(enemy.x - me.x, enemy.y - me.y) <= range + E.BALL_R) {
-            let diff = Math.abs(Math.atan2(enemy.y - me.y, enemy.x - me.x) - ang);
-            while (diff > Math.PI) diff = Math.abs(diff - 2 * Math.PI);
-            if (diff <= spread / 2 + 0.3) { E.applyHit(me, enemy, 6, { bleed: 1 }); hitAny = true; }
+    act(m, E) {
+      const t = E.nr(m);
+      if (!t) return;
+      const a = Math.atan2(t.y - m.y, t.x - m.x);
+      const u = m.st.v === 2 ? 3 : (m.st.v === 1 ? 2 : 1);
+      E.pj(m, m.x, m.y, Math.cos(a) * 240, Math.sin(a) * 240, 14, '#7dd3fc', 1,
+        (p, g) => {
+          E.hit(m, g, 5 * u);
+          m.st.s++;
+          if (m.st.s >= 3 && m.st.v !== 2) {
+            m.st.v = 2;
+            m.st.p = 1.25;
+            E.tx(m.x, m.y - 20, '빙결 2단계', '#38bdf8');
+            E.zn({ tp: 'ice', tm: m.tm, lf: 999 });
+          } else if (m.st.s === 2 && m.st.v === 0) {
+            m.st.v = 1;
+            m.st.p = 1.25;
+            E.tx(m.x, m.y - 20, '빙결 1단계', '#7dd3fc');
           }
+        },
+        () => {
+          m.st.s = 0;
+          m.st.v = 0;
+          m.st.p = 1;
         }
-        if (!isSecond) hitFirst = hitAny; else if (hitFirst && hitAny) E.healBall(me, 1);
-      };
-      doSlash(-0.55, false);
-      setTimeout(() => doSlash(0.55, true), 250);
+      );
     }
   },
   {
-    id: 'H', name: '공 H (물술사)', symbol: 'H', color: '#0284c7', hp: 100, cooldown: 5.0,
-    desc: '쿨타임 5초 · 이동 경로에 지름 7배 대형 물웅덩이 3개 연속 생성(4초 유지) · 닿은 적에게 6 피해 + 둔화 1 부여.',
-    drawAura(me, ctx, E) {
-      ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R + 5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)'; ctx.lineWidth = 2; ctx.stroke();
+    id: 'F', n: '공 F (킬러퀸)', s: '☠', c: '#f472b6', cd: 4,
+    d: '1초마다 폭탄 설치 · 4초마다 모든 폭탄 일제 기폭(반지름 3배 10 피해)',
+    init(m) {
+      m.st = { t: 0, b: [] };
     },
-    onAction(me, E) {
+    tick(m, dt, E) {
+      m.st.t += dt;
+      if (m.st.t >= 1) {
+        m.st.t -= 1;
+        if (m.st.b.length < 10) {
+          const z = { tp: 'bmb', tm: m.tm, x: m.x, y: m.y, r: 7, c: '#ec4899', lf: 999 };
+          m.st.b.push(z);
+          E.zn(z);
+        }
+      }
+    },
+    act(m, E) {
+      m.st.b.forEach(z => {
+        z.lf = 0;
+        E.fx('ring', z.x, z.y, 42, 'rgba(244,114,182,0.55)');
+        E.en(m).forEach(e => {
+          if (Math.hypot(e.x - z.x, e.y - z.y) <= 56) E.hit(m, e, 10);
+        });
+      });
+      m.st.b = [];
+    }
+  },
+  {
+    id: 'G', n: '공 G (혈귀)', s: 'G', c: '#881337', cd: 4,
+    d: '4초마다 좌·우 대각선 2연타 할퀴기(각 6 피해+출혈 1) · 2연타 적중 시 회복 1',
+    act(m, E) {
+      const t = E.nr(m);
+      if (!t) return;
+      const ba = Math.atan2(t.y - m.y, t.x - m.x);
+      let h1 = 0;
+      const sl = (o, s) => {
+        if (m.hp <= 0) return;
+        const ag = ba + o;
+        E.fx('arc', m.x, m.y, 90, 'rgba(225,29,72,0.45)', ag);
+        let ok = 0;
+        E.en(m).forEach(e => {
+          if (E.ds(m, e) <= 104) {
+            let df = Math.abs(Math.atan2(e.y - m.y, e.x - m.x) - ag);
+            while (df > Math.PI) df = Math.abs(df - Math.PI * 2);
+            if (df <= 1.3) {
+              E.hit(m, e, 6, { bleed: 1 });
+              ok = 1;
+            }
+          }
+        });
+        if (!s) h1 = ok;
+        else if (h1 && ok) E.hl(m, 1);
+      };
+      sl(-0.55, 0);
+      setTimeout(() => sl(0.55, 1), 250);
+    }
+  },
+  {
+    id: 'H', n: '공 H (물술사)', s: 'H', c: '#0284c7', cd: 5,
+    d: '5초마다 지름 7배 물웅덩이 3개 연속 생성(4초 유지 · 6 피해+둔화 1)',
+    act(m, E) {
       for (let i = 0; i < 3; i++) {
         setTimeout(() => {
-          if (me.hp <= 0) return;
-          E.addZone({
-            type: 'waterPuddle', team: me.team, owner: me, x: me.x, y: me.y,
-            radius: E.BALL_R * 7.0, color: 'rgba(14, 165, 233, 0.22)', stroke: 'rgba(56, 189, 248, 0.45)',
-            life: 4.0, hitSet: new Set(),
-            update(z, dt, eng) {
-              for (const enemy of eng.getAliveEnemies(z.owner)) {
-                if (!z.hitSet.has(enemy) && Math.hypot(enemy.x - z.x, enemy.y - z.y) <= z.radius + eng.BALL_R) {
-                  z.hitSet.add(enemy); eng.applyHit(z.owner, enemy, 6, { slow: 1 });
+          if (m.hp <= 0) return;
+          E.zn({
+            tp: 'wt', tm: m.tm, ow: m, x: m.x, y: m.y,
+            r: 98, c: 'rgba(14,165,233,0.22)', lf: 4, hs: new Set(),
+            up(z) {
+              E.en(z.ow).forEach(e => {
+                if (!z.hs.has(e) && Math.hypot(e.x - z.x, e.y - z.y) <= 112) {
+                  z.hs.add(e);
+                  E.hit(z.ow, e, 6, { slow: 1 });
                 }
-              }
+              });
             }
           });
         }, i * 300);
@@ -211,67 +213,67 @@ const BALL_ROSTER = [
     }
   },
   {
-    id: 'I', name: '공 I (번개술사)', symbol: '⚡', color: '#eab308', hp: 100, cooldown: 5.0,
-    desc: '쿨타임 5초 · 가로 레이저(7 피해+감전 1) · 누적 감전 5 또는 HP 50% 이하 시 십자(10 피해+감전 2) · 누적 15 시 8방향(15 피해+감전 2).',
-    init(me) { me.state.totalShock = 0; me.state.laserStage = 0; },
-    drawAura(me, ctx, E) {
-      ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R + 3 + me.state.laserStage * 3, 0, Math.PI * 2);
-ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 2; ctx.stroke();
-},
-onAction(me, E) {
-const stage = me.state.laserStage, thick = E.BALL_R * 2.4;
-const dmg = stage === 2 ? 15 : (stage === 1 ? 10 : 7), shockAdd = stage >= 1 ? 2 : 1, L = 400;
-const lines = [{ x1: me.x - L, y1: me.y, x2: me.x + L, y2: me.y }];
-if (stage >= 1) lines.push({ x1: me.x, y1: me.y - L, x2: me.x, y2: me.y + L });
-if (stage >= 2) {
-lines.push({ x1: me.x - L, y1: me.y - L, x2: me.x + L, y2: me.y + L });
-lines.push({ x1: me.x - L, y1: me.y + L, x2: me.x + L, y2: me.y - L });
-}
-E.spawnEffect('lasers', me.x, me.y, { radius: thick, color: 'rgba(254, 240, 138, 0.75)', duration: 0.35, lines });
-for (const enemy of E.getAliveEnemies(me)) {
-const hitR = thick / 2 + E.BALL_R;
-let isHit = Math.abs(enemy.y - me.y) <= hitR;
-if (stage >= 1 && Math.abs(enemy.x - me.x) <= hitR) isHit = true;
-if (stage >= 2) {
-const d1 = Math.abs((enemy.x - me.x) - (enemy.y - me.y)) / Math.SQRT2;
-const d2 = Math.abs((enemy.x - me.x) + (enemy.y - me.y)) / Math.SQRT2;
-if (d1 <= hitR || d2 <= hitR) isHit = true;
-}
-if (isHit) { E.applyHit(me, enemy, dmg, { shock: shockAdd }); me.state.totalShock += shockAdd; }
-}
-if (me.state.totalShock >= 15 && me.state.laserStage < 2) {
-me.state.laserStage = 2; E.spawnText(me.x, me.y - 20, '과전류 2단계!', '#fef08a');
-} else if (me.state.totalShock >= 5 && me.state.laserStage < 1) {
-me.state.laserStage = 1; E.spawnText(me.x, me.y - 20, '과전류 1단계!', '#fef08a');
-}
-}
-},
-{
-id: 'J', name: '공 J (성직자)', symbol: '+', color: '#16a34a', hp: 100, cooldown: 4.0,
-desc: '쿨타임 4초 · 대형 초록 구체 발사 · 2v2: 아군 우선 치유(3초간 10)·적 5 피해 + 아군 사망 시 1회 소생 · 1v1: 적에게 12 피해.',
-init(me) { me.state.hasRevived = false; },
-drawAura(me, ctx, E) {
-ctx.beginPath(); ctx.arc(me.x, me.y, E.BALL_R * 1.6, 0, Math.PI * 2);
-ctx.fillStyle = 'rgba(34, 197, 94, 0.22)'; ctx.fill();
-},
-onAction(me, E) {
-const allies = E.getAliveAllies(me, false);
-const target = allies.length > 0 ? allies : E.getNearestEnemy(me);
-if (!target) return;
-const dx = target.x - me.x, dy = target.y - me.y, dist = Math.hypot(dx, dy) || 1;
-E.addProjectile({
-owner: me, x: me.x, y: me.y, vx: (dx / dist) * 250, vy: (dy / dist) * 250,
-radius: E.BALL_R * 2.5, color: 'rgba(34, 197, 94, 0.65)', ignoreAlly: false, grace: 0.15,
-onHit(p, t, eng) {
-if (t.team === p.owner.team) {
-t.healHotTimer = 3.0; t.healHotRemain = 10;
-eng.spawnText(t.x, t.y - 16, '치유 +10', '#4ade80');
-} else {
-const hasAlly = eng.getAliveAllies(p.owner, false).length > 0;
-eng.applyHit(p.owner, t, hasAlly ? 5 : 12);
-}
-}
-});
-}
-}
+    id: 'I', n: '공 I (번개술사)', s: '⚡', c: '#eab308', cd: 5,
+    d: '5초마다 레이저(7 피해+감전 1) · 감전 5 또는 HP 50% 이하 십자 · 15 시 8방향',
+    init(m) {
+      m.st = { s: 0, v: 0 };
+    },
+    act(m, E) {
+      const v = m.st.v;
+      const dm = v === 2 ? 15 : (v === 1 ? 10 : 7);
+      const sa = v >= 1 ? 2 : 1;
+      const L = 400;
+      const ln = [{ a: m.x - L, b: m.y, c: m.x + L, d: m.y }];
+      if (v >= 1) ln.push({ a: m.x, b: m.y - L, c: m.x, d: m.y + L });
+      if (v >= 2) {
+        ln.push({ a: m.x - L, b: m.y - L, c: m.x + L, d: m.y + L });
+        ln.push({ a: m.x - L, b: m.y + L, c: m.x + L, d: m.y - L });
+      }
+      E.fx('ls', m.x, m.y, 32, 'rgba(254,240,138,0.75)', 0, ln);
+      E.en(m).forEach(e => {
+        let h = Math.abs(e.y - m.y) <= 30;
+        if (v >= 1 && Math.abs(e.x - m.x) <= 30) h = 1;
+        if (v >= 2) {
+          const d1 = Math.abs((e.x - m.x) - (e.y - m.y)) / 1.414;
+          const d2 = Math.abs((e.x - m.x) + (e.y - m.y)) / 1.414;
+          if (d1 <= 30 || d2 <= 30) h = 1;
+        }
+        if (h) {
+          E.hit(m, e, dm, { shock: sa });
+          m.st.s += sa;
+        }
+      });
+      if (m.st.s >= 15 && m.st.v !== 2) {
+        m.st.v = 2;
+        E.tx(m.x, m.y - 20, '과전류 2단계', '#fef08a');
+      } else if (m.st.s >= 5 && m.st.v === 0) {
+        m.st.v = 1;
+        E.tx(m.x, m.y - 20, '과전류 1단계', '#fef08a');
+      }
+    }
+  },
+  {
+    id: 'J', n: '공 J (성직자)', s: '+', c: '#16a34a', cd: 4,
+    d: '4초마다 대형 초록 구체 발사 · 2v2: 아군 치유(10)·적 5 피해+소생 1회 · 1v1: 12 피해',
+    init(m) {
+      m.st = { r: 0 };
+    },
+    act(m, E) {
+      const al = E.al(m);
+      const t = al.length ? al.at(0) : E.nr(m);
+      if (!t) return;
+      const a = Math.atan2(t.y - m.y, t.x - m.x);
+      E.pj(m, m.x, m.y, Math.cos(a) * 250, Math.sin(a) * 250, 35, 'rgba(34,197,94,0.65)', 0,
+        (p, g) => {
+          if (g.tm === m.tm) {
+            g.ht = 3;
+            g.hv = 10;
+            E.tx(g.x, g.y - 16, '치유 +10', '#4ade80');
+          } else {
+            E.hit(m, g, E.al(m).length ? 5 : 12);
+          }
+        }
+      );
+    }
+  }
 ];
