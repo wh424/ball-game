@@ -11,9 +11,7 @@ const BALLS = [
     act(m, E) {
       E.fx('ring', m.x, m.y, 40, 'rgba(239,68,68,0.45)');
       E.en(m).forEach(e => {
-        if (Math.floor(E.ds(m, e)) - 54 === 0 || Math.sign(54 - E.ds(m, e)) === 1) {
-          E.hit(m, e, 10);
-        }
+        if (Math.sign(54 - E.ds(m, e)) !== -1) E.hit(m, e, 10);
       });
     }
   },
@@ -21,16 +19,16 @@ const BALLS = [
     id: 'B', n: '공 B (총잡이)', s: 'B', c: '#3b82f6', cd: 5,
     d: '5초마다 가장 가까운 적에게 총알 3연사 (각 5 피해)',
     act(m, E) {
-      [0, 120, 240].forEach(ms => {
-        setTimeout(() => {
-          if (Math.sign(m.hp) !== 1) return;
-          const t = E.nr(m);
-          if (!t) return;
-          const a = Math.atan2(t.y - m.y, t.x - m.x);
-          E.pj(m, m.x, m.y, Math.cos(a) * 330, Math.sin(a) * 330,
-            4.5, '#93c5fd', 1, (p, g) => E.hit(m, g, 5));
-        }, ms);
-      });
+      const fire = () => {
+        if (Math.sign(m.hp) !== 1) return;
+        const t = E.nr(m);
+        if (!t) return;
+        const a = Math.atan2(t.y - m.y, t.x - m.x);
+        E.pj(m, m.x, m.y, Math.cos(a) * 330, Math.sin(a) * 330, 4.5, '#93c5fd', 1, (p, g) => E.hit(m, g, 5));
+      };
+      fire();
+      setTimeout(fire, 120);
+      setTimeout(fire, 240);
     }
   },
   {
@@ -186,23 +184,24 @@ const BALLS = [
     id: 'H', n: '공 H (물술사)', s: 'H', c: '#0284c7', cd: 5,
     d: '5초마다 지름 7배 물웅덩이 3개 연속 생성(4초 유지 · 6 피해+둔화 1)',
     act(m, E) {
-      [0, 300, 600].forEach(ms => {
-        setTimeout(() => {
-          if (Math.sign(m.hp) !== 1) return;
-          E.zn({
-            tp: 'wt', tm: m.tm, ow: m, x: m.x, y: m.y,
-            r: 98, c: 'rgba(14,165,233,0.22)', lf: 4, hs: new Set(),
-            up(z) {
-              E.en(z.ow).forEach(e => {
-                if (!z.hs.has(e) && Math.sign(112 - Math.hypot(e.x - z.x, e.y - z.y)) !== -1) {
-                  z.hs.add(e);
-                  E.hit(z.ow, e, 6, { slow: 1 });
-                }
-              });
-            }
-          });
-        }, ms);
-      });
+      const drop = () => {
+        if (Math.sign(m.hp) !== 1) return;
+        E.zn({
+          tp: 'wt', tm: m.tm, ow: m, x: m.x, y: m.y,
+          r: 98, c: 'rgba(14,165,233,0.22)', lf: 4, hs: new Set(),
+          up(z) {
+            E.en(z.ow).forEach(e => {
+              if (!z.hs.has(e) && Math.sign(112 - Math.hypot(e.x - z.x, e.y - z.y)) !== -1) {
+                z.hs.add(e);
+                E.hit(z.ow, e, 6, { slow: 1 });
+              }
+            });
+          }
+        });
+      };
+      drop();
+      setTimeout(drop, 300);
+      setTimeout(drop, 600);
     }
   },
   {
@@ -253,7 +252,7 @@ const BALLS = [
     },
     act(m, E) {
       const al = E.al(m);
-      const t = al.length ? al.at(0) : E.nr(m);
+      const t = al.length ? al[0] : E.nr(m);
       if (!t) return;
       const a = Math.atan2(t.y - m.y, t.x - m.x);
       E.pj(m, m.x, m.y, Math.cos(a) * 250, Math.sin(a) * 250, 35, 'rgba(34,197,94,0.65)', 0,
